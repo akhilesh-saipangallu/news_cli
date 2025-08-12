@@ -82,7 +82,6 @@ def user_index_schema():
         },
         'fields':[
             {'name': 'id', 'path': '$.id', 'type': 'text'},
-            {'name': 'region', 'path': '$.region', 'type': 'tag'},
             {'name': 'topic_name', 'path': '$.topics[*].name', 'type': 'tag', 'attrs': {'separator': ','}},
             {'name': 'topic_count', 'path': '$.topics[*].count', 'type': 'numeric', 'attrs': {'sortable': True}},
             {'name': 'clicked', 'path': '$.clicked[*]', 'type': 'tag', 'attrs': {'separator': ','}},
@@ -272,7 +271,6 @@ def action_view(**kwargs):
     User JSON shape:
     {
         'id': 'a9b0d6d3',
-        'region': 'bangalore',
         'topics': [{'name': 'bollywood', 'count': 5}, {'name': 'science', 'count': 15}],
         'clicked': [1, 15, 99]
     }
@@ -343,12 +341,12 @@ def action_view(**kwargs):
 
 def get_top_2_topics(u_doc):
     """
-    u_doc: {
-                'id': 'a9b0d6d3',
-                'region': 'bangalore',
-                'topics': [{'name': 'bollywood', 'count': 5}, {'name': 'science', 'count': 15}],
-                'clicked': [1, 15, 99]
-            }
+    u_doc:
+    {
+        'id': 'a9b0d6d3',
+        'topics': [{'name': 'bollywood', 'count': 5}, {'name': 'science', 'count': 15}],
+        'clicked': [1, 15, 99]
+    }
     """
 
     u_topics = u_doc.get('topics', [])
