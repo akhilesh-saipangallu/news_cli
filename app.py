@@ -9,9 +9,12 @@ import datetime
 from redis import Redis
 from redisvl.schema import IndexSchema
 from redisvl.index import SearchIndex
-from redisvl.query import FilterQuery
+from redisvl.query import FilterQuery, VectorQuery
 from redisvl.query.filter import Tag, Num
 from redis.commands.search.aggregation import Desc
+
+import numpy as np
+from sentence_transformers import SentenceTransformer
 
 
 REDIS_URL = 'redis://localhost:6379/0'
@@ -24,6 +27,8 @@ ARTICLE_INDEX = 'ht:idx:articles'
 USER_INDEX = 'ht:idx:users'
 # TTL for anonymous users (14 days in seconds)
 USER_TTL = 14 * 24 * 3600
+
+em_model = SentenceTransformer('all-MiniLM-L6-v2')
 
 
 def redis_client():
@@ -69,6 +74,17 @@ def article_index_schema():
             {'name': 'topics', 'path': '$.topics[*]', 'type': 'tag', 'attrs': {'separator': ','}},
             {'name': 'created_at', 'path': '$.created_at', 'type': 'numeric', 'attrs': {'sortable': True}},
             {'name': 'pop_score', 'path': '$.pop_score', 'type': 'numeric', 'attrs': {'sortable': True}},
+            {
+                'name': 'headline_embedding',
+                'path': '$.headline_embedding',
+                'type': 'vector',
+                'attrs': {
+                    'algorithm': 'HNSW', # or 'FLAT'
+                    'datatype': 'FLOAT32',
+                    'dims': 384,
+                    'distance_metric': 'COSINE',
+                }
+            }
         ],
     })
 
@@ -123,6 +139,8 @@ def load_articles_to_redis():
         eligible = art.get('eligible', True)
         eligible_tag = 'true' if bool(eligible) else 'false'  # TAG-friendly
 
+        headline_embedding = embed_sentence(headline)
+
         obj = {
             'storyId': story_id,
             'headline': headline,
@@ -131,7 +149,8 @@ def load_articles_to_redis():
             'topics': topics,
             'created_at': created,
             'pop_score': _rand_pop(),     # <-- randomized here
-            'eligible': eligible_tag
+            'eligible': eligible_tag,
+            'headline_embedding': headline_embedding.tolist(),
         }
 
         pipe.json().set(f'{ARTICLE_PREFIX}{story_id}', '$', obj)
@@ -145,10 +164,17 @@ def delete_all_users():
         r.delete(key)
 
 
+def delete_all_articles():
+    r = redis_client()
+    for key in r.scan_iter(f'{ARTICLE_PREFIX}*'):
+        r.delete(key)
+
+
 def action_init(**kwargs):
     """
     Kwargs:
-        delete_users : if true delete all users
+        delete_users    : if true delete all users
+        delete_articles : if true delete all articles
     """
 
     r = redis_client()
@@ -173,6 +199,10 @@ def action_init(**kwargs):
     if delete_users and delete_users == 'true':
         delete_all_users()
 
+    delete_articles = kwargs.get('delete_articles')
+    if delete_articles and delete_articles == 'true':
+        delete_all_articles()
+
     load_articles_to_redis()
     print('init: done')
 
@@ -193,12 +223,16 @@ def create_new_user():
 def print_headlines(data):
     f_data = []
     for i, each in enumerate(data):
-        f_data.append({
+        t = {
             'id': i + 1,
             'storyId': each['storyId'],
             'topics': each['topics'],
             'headline': each['headline'],
-        })
+        }
+        if 'vector_distance' in each:
+            t['vector_distance'] = each['vector_distance']
+
+        f_data.append(t)
     data = f_data
 
     if not isinstance(data, list) or not data:
@@ -439,11 +473,60 @@ def parse_kv_args(kv_list):
     return out
 
 
+def embed_sentence(sentence: str):
+    """Return a 384-dim semantic embedding for an English sentence."""
+    v = em_model.encode(sentence, normalize_embeddings=True)
+    return np.asarray(v, dtype=np.float32)
+
+
+
+def action_v_search(**kwargs):
+    """
+    Kwargs (required):
+        search_text : search text to perform VSS on
+
+    Kwargs (optional):
+        topic       : topic to filter on
+        n           : number of headlines; defaults to 10
+    """
+
+    search_text = kwargs.get('search_text')
+    if not search_text:
+        print_with_separator('error', 'provide search_text')
+        return
+    search_emb = embed_sentence(search_text)
+    print('search_text:', search_text)
+
+    topic = kwargs.get('topic')
+    filter_expression = None
+    if topic:
+        filter_expression = (Tag('topics') == topic)
+
+    n = int(kwargs.get('n', 10))
+
+    idx = SearchIndex(article_index_schema(), redis_client())
+    res = idx.query(
+        VectorQuery(
+            vector=search_emb,
+            vector_field_name='headline_embedding',
+            num_results=n,
+            return_fields=['storyId', 'topics', 'headline', 'vector_distance'],
+            return_score=True,
+            filter_expression=filter_expression,
+            dtype='float32',
+            # dialect=2,
+            sort_by='vector_distance',
+        ).sort_by('vector_distance', asc=True).dialect(3)
+    )
+    print(res)
+    print_headlines(res)
+
+
 def main():
     parser = argparse.ArgumentParser(description='NewsCLI')
     parser.add_argument(
         'action',
-        choices=['init', 'new_user', 'headlines', 'view', 'personal_headlines'],
+        choices=['init', 'new_user', 'headlines', 'view', 'personal_headlines', 'v_search'],
         help='Action to run'
     )
     parser.add_argument('params', nargs='*', help='Optional key=value params for the action')
@@ -459,6 +542,8 @@ def main():
         action_view(**kwargs)
     elif args.action == 'personal_headlines':
         action_personalized_headlines(**kwargs)
+    elif args.action == 'v_search':
+        action_v_search(**kwargs)
     else:
         print('unknown action', file=sys.stderr)
         sys.exit(2)
