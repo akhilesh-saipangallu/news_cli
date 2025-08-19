@@ -65,7 +65,10 @@ A tiny CLI to demo **anonymous user personalization** for a news homepage using 
   * Records that the user viewed/clicked the article; updates their topic counts and history
 * `python app.py personal_headlines uid=46fe25ff`
 
-  * Returns a **gradually personalized** list (mostly fresh & popular, with a nudge toward the user’s topics)
+  * Returns a **personalized** list (mostly fresh & popular, with a nudge toward the user’s topics)
+* `python app.py v_search search_text='football' topic='sports'`
+
+  * Performs a VSS based by converting the search-text on the article topic subset
 
 > Default page size is 10; pass `n=15` to get 15 items where supported.
 
