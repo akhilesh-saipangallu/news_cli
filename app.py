@@ -221,6 +221,10 @@ def create_new_user():
 
 
 def print_headlines(data):
+    if not data or len(data) == 0:
+        print('No results found')
+        return
+
     f_data = []
     for i, each in enumerate(data):
         t = {
@@ -495,7 +499,6 @@ def action_v_search(**kwargs):
         print_with_separator('error', 'provide search_text')
         return
     search_emb = embed_sentence(search_text)
-    print('search_text:', search_text)
 
     topic = kwargs.get('topic')
     filter_expression = None
@@ -510,15 +513,13 @@ def action_v_search(**kwargs):
             vector=search_emb,
             vector_field_name='headline_embedding',
             num_results=n,
-            return_fields=['storyId', 'topics', 'headline', 'vector_distance'],
+            return_fields=['storyId', 'topics', 'headline'],
             return_score=True,
             filter_expression=filter_expression,
             dtype='float32',
-            # dialect=2,
             sort_by='vector_distance',
         ).sort_by('vector_distance', asc=True).dialect(3)
     )
-    print(res)
     print_headlines(res)
 
 
